@@ -16,14 +16,13 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
 
-# 🚨 CCTV 함수 (진행 상황을 깃허브 로그에 즉시 강제 출력)
 def log(msg):
     print(f"👉 {msg}", flush=True)
 
-# 제미나이 AI 최신 모델 설정
+# [수정 1] AI 에러 해결: 가장 안정적인 gemini-pro 모델로 롤백
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-pro')
 
 def clean_html(raw_html):
     cleanr = re.compile('<.*?>')
@@ -52,21 +51,44 @@ def search_naver_api(keyword, search_type):
             yesterday_str = yesterday_kst.strftime("%Y%m%d")
             
             for item in data['items']:
+                post_date_formatted = ""
+                
+                # [수정 2 & 3] 날짜 필터링 및 발행일 포맷팅
                 if search_type == "blog":
-                    if item.get("postdate") != yesterday_str:
+                    raw_date = item.get("postdate", "")
+                    if raw_date != yesterday_str:
                         continue 
+                    if len(raw_date) == 8:
+                        post_date_formatted = f"{raw_date[:4]}.{raw_date[4:6]}.{raw_date[6:]}"
+                        
                 elif search_type == "news":
-                    pub_date_tuple = email.utils.parsedate_tz(item['pubDate'])
+                    pub_date_tuple = email.utils.parsedate_tz(item.get('pubDate', ''))
                     if pub_date_tuple:
                         pub_date = datetime.fromtimestamp(email.utils.mktime_tz(pub_date_tuple))
                         if pub_date.strftime("%Y%m%d") != yesterday_str:
                             continue
+                        post_date_formatted = pub_date.strftime("%Y.%m.%d")
+                        
+                elif search_type == "cafearticle":
+                    # 카페는 네이버 API에서 날짜 데이터를 주지 않아 필터링 불가! (미제공 표기)
+                    post_date_formatted = "날짜 미제공"
 
                 title = clean_html(item['title'])
                 link = item['link']
                 snippet = clean_html(item['description'])
-                posts.append({"title": title, "link": link, "snippet": snippet})
-                    
+                
+                # 데이터 딕셔너리에 'date' 항목 추가
+                posts.append({
+                    "title": title, 
+                    "link": link, 
+                    "snippet": snippet,
+                    "date": post_date_formatted
+                })
+            
+            # 카페는 어제 글만 걸러낼 수 없으므로, 도배를 막기 위해 최신순 5개만 자릅니다.
+            if search_type == "cafearticle":
+                posts = posts[:5]
+                
             return posts
     except Exception as e:
         log(f"❌ 네이버 API 호출 에러 ({keyword}, {search_type}): {e}")
@@ -92,7 +114,7 @@ def generate_ai_summary(cafe_data, news_data, blog_data):
     if post_count == 0:
         return "어제 하루 동안 새로 올라온 관련 콘텐츠가 없습니다."
         
-    prompt = f"""다음은 어제 하루 동안 네이버 카페, 뉴스 기사, 블로그에 올라온 우리 회사 서비스(도도포인트, 나우웨이팅) 관련 게시글 데이터입니다.
+    prompt = f"""다음은 최근 네이버 카페, 뉴스 기사, 블로그에 올라온 우리 회사 서비스(도도포인트, 나우웨이팅) 관련 게시글 데이터입니다.
 이 내용을 바탕으로 점주들이나 고객들의 반응, 불만 사항, 혹은 특이한 시장 동향(인사이트)을 파악해서 딱 2~3줄로 핵심만 요약해주세요.
 말투는 비즈니스 보고서 형식(~음, ~함)으로 해주세요.
 
@@ -107,7 +129,7 @@ def generate_ai_summary(cafe_data, news_data, blog_data):
 
 def send_slack_message(text, thread_ts=None):
     if not SLACK_BOT_TOKEN or not SLACK_CHANNEL_ID:
-        log("❌ 에러: 슬랙 봇 토큰이나 채널 ID가 없습니다! (Secrets 설정을 확인하세요)")
+        log("❌ 에러: 슬랙 봇 토큰이나 채널 ID가 없습니다!")
         return None
         
     headers = {
@@ -126,19 +148,19 @@ def send_slack_message(text, thread_ts=None):
     if data.get("ok"):
         return data.get("ts")
     else:
-        # 🚨 여기서 슬랙이 거절한 진짜 이유를 출력합니다.
         log(f"❌ 슬랙 전송 거절됨! 상세 이유: {data}")
         return None
 
 def format_section(title, data):
     message = f"*{title}*\n"
     for keyword in KEYWORDS:
-        message += f"==============\n*[ {keyword} ] 어제자 검색 결과*\n"
+        message += f"==============\n*[ {keyword} ] 검색 결과*\n"
         if not data[keyword]:
             message += "새로운 글이 없습니다.\n\n"
         else:
             for post in data[keyword]:
-                message += f"• <{post['link']}|{post['title']}>\n  > _{post['snippet'][:100]}..._\n"
+                # [수정 3] 제목 옆에 괄호 치고 발행일(date) 추가
+                message += f"• <{post['link']}|{post['title']}> ({post['date']})\n  > _{post['snippet'][:100]}..._\n"
             message += "\n"
     return message
 
@@ -146,13 +168,13 @@ def main():
     log("🚀 스크랩 봇 작동을 시작합니다!")
     
     if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
-        log("❌ 네이버 API 키가 없습니다. 실행을 멈춥니다.")
+        log("❌ 네이버 API 키가 없습니다.")
         return
 
     kst_now = datetime.utcnow() + timedelta(hours=9)
     today = kst_now.strftime("%Y년 %m월 %d일")
     
-    log("🔍 1. 네이버에서 어제자 데이터를 수집 중입니다...")
+    log("🔍 1. 네이버에서 데이터를 수집 중입니다...")
     cafe_data = {}
     news_data = {}
     blog_data = {}
@@ -176,8 +198,6 @@ def main():
         send_slack_message(format_section("📰 기사 (뉴스)", news_data), thread_ts=main_ts)
         send_slack_message(format_section("📝 블로그", blog_data), thread_ts=main_ts)
         log("🎉 모든 작업이 성공적으로 끝났습니다!")
-    else:
-        log("❌ 슬랙 메인 리포트 전송에 실패하여, 스레드를 달지 못하고 종료합니다.")
 
 if __name__ == "__main__":
     main()
