@@ -1,11 +1,10 @@
-name: Blog Scrap Bot
+name: Cafe Scrap Bot
 
 on:
   schedule:
-    # 분 시 일 월 요일 (UTC 기준)
-    # UTC 오전 5시 = 한국 시간(KST) 오후 2시
-    - cron: '0 5 * * *'
-  workflow_dispatch: # 이 한 줄 덕분에 원할 때 언제든 수동으로 실행해 볼 수 있습니다!
+    # 한국 시간(KST) 오전 10시 = UTC 오전 1시
+    - cron: '0 1 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -15,16 +14,17 @@ jobs:
     - name: 깃허브 코드 가져오기
       uses: actions/checkout@v4
 
-    - name: 파이썬 컴퓨터 세팅하기
+    - name: 파이썬 세팅하기
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
-    - name: 필요한 도구(라이브러리) 설치하기
+    - name: 필요한 도구 설치하기 (제미나이 AI 도구 추가)
       run: |
-        pip install requests beautifulsoup4
+        pip install requests beautifulsoup4 google-generativeai
 
-    - name: 블로그 스크랩 프로그램 실행하기
+    - name: 카페 스크랩 및 AI 요약 프로그램 실행하기
       env:
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: python main.py
