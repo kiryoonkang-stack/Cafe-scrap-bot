@@ -110,6 +110,7 @@ def generate_ai_summary(cafe_data, news_data, blog_data):
 
 def send_slack_message(text, thread_ts=None):
     if not SLACK_BOT_TOKEN or not SLACK_CHANNEL_ID:
+        print("❌ 에러: 깃허브 Secrets에 토큰이나 채널 ID가 등록되지 않았습니다.")
         return None
         
     headers = {
@@ -127,7 +128,10 @@ def send_slack_message(text, thread_ts=None):
     data = res.json()
     if data.get("ok"):
         return data.get("ts")
-    return None
+    else:
+        # 슬랙이 거절한 '진짜 이유'를 화면에 출력합니다!
+        print(f"❌ 슬랙 전송 실패 상세 이유: {data}") 
+        return None
 
 def format_section(title, data):
     message = f"*{title}*\n"
