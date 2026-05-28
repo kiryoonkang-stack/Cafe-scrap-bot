@@ -16,6 +16,10 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET")
 
+# 🚨 CCTV 함수 (진행 상황을 깃허브 로그에 즉시 강제 출력)
+def log(msg):
+    print(f"👉 {msg}", flush=True)
+
 # 제미나이 AI 최신 모델 설정
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -26,11 +30,9 @@ def clean_html(raw_html):
     return re.sub(cleanr, '', raw_html).replace('&quot;', '"').replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').replace('&apos;', "'")
 
 def search_naver_api(keyword, search_type):
-    # 1. 정확히 일치하는 단어만 검색하도록 큰따옴표("") 추가
     exact_keyword = f'"{keyword}"'
     encText = urllib.parse.quote(exact_keyword)
     
-    # [수정됨] 어제 글을 하나도 놓치지 않기 위해 최대치인 100개를 한 번에 불러옵니다.
     url = f"https://openapi.naver.com/v1/search/{search_type}.json?query={encText}&display=100&sort=date"
     
     request = urllib.request.Request(url)
@@ -45,14 +47,11 @@ def search_naver_api(keyword, search_type):
             data = json.loads(response_body.decode('utf-8'))
             
             posts = []
-            
-            # 한국 시간(KST) 기준 '어제' 날짜 계산
             kst_now = datetime.utcnow() + timedelta(hours=9)
             yesterday_kst = kst_now - timedelta(days=1)
             yesterday_str = yesterday_kst.strftime("%Y%m%d")
             
             for item in data['items']:
-                # 날짜 필터링 로직 (어제 쓴 글만 통과)
                 if search_type == "blog":
                     if item.get("postdate") != yesterday_str:
                         continue 
@@ -67,12 +66,10 @@ def search_naver_api(keyword, search_type):
                 link = item['link']
                 snippet = clean_html(item['description'])
                 posts.append({"title": title, "link": link, "snippet": snippet})
-                
-                # [수정됨] 5개 제한 로직 삭제! 이제 어제 발행된 글이라면 개수 제한 없이 모두 posts에 담깁니다.
                     
             return posts
     except Exception as e:
-        print(f"네이버 API 호출 에러 ({keyword}, {search_type}): {e}")
+        log(f"❌ 네이버 API 호출 에러 ({keyword}, {search_type}): {e}")
         return []
     return []
 
@@ -110,7 +107,7 @@ def generate_ai_summary(cafe_data, news_data, blog_data):
 
 def send_slack_message(text, thread_ts=None):
     if not SLACK_BOT_TOKEN or not SLACK_CHANNEL_ID:
-        print("❌ 에러: 깃허브 Secrets에 토큰이나 채널 ID가 등록되지 않았습니다.")
+        log("❌ 에러: 슬랙 봇 토큰이나 채널 ID가 없습니다! (Secrets 설정을 확인하세요)")
         return None
         
     headers = {
@@ -129,11 +126,58 @@ def send_slack_message(text, thread_ts=None):
     if data.get("ok"):
         return data.get("ts")
     else:
-        # 슬랙이 거절한 '진짜 이유'를 화면에 출력합니다!
-        print(f"❌ 슬랙 전송 실패 상세 이유: {data}") 
+        # 🚨 여기서 슬랙이 거절한 진짜 이유를 출력합니다.
+        log(f"❌ 슬랙 전송 거절됨! 상세 이유: {data}")
         return None
 
 def format_section(title, data):
     message = f"*{title}*\n"
     for keyword in KEYWORDS:
         message += f"==============\n*[ {keyword} ] 어제자 검색 결과*\n"
+        if not data[keyword]:
+            message += "새로운 글이 없습니다.\n\n"
+        else:
+            for post in data[keyword]:
+                message += f"• <{post['link']}|{post['title']}>\n  > _{post['snippet'][:100]}..._\n"
+            message += "\n"
+    return message
+
+def main():
+    log("🚀 스크랩 봇 작동을 시작합니다!")
+    
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        log("❌ 네이버 API 키가 없습니다. 실행을 멈춥니다.")
+        return
+
+    kst_now = datetime.utcnow() + timedelta(hours=9)
+    today = kst_now.strftime("%Y년 %m월 %d일")
+    
+    log("🔍 1. 네이버에서 어제자 데이터를 수집 중입니다...")
+    cafe_data = {}
+    news_data = {}
+    blog_data = {}
+    
+    for keyword in KEYWORDS:
+        cafe_data[keyword] = search_naver_api(keyword, "cafearticle")
+        news_data[keyword] = search_naver_api(keyword, "news")
+        blog_data[keyword] = search_naver_api(keyword, "blog")
+        
+    log("🧠 2. 데이터 수집 완료! AI 요약을 생성합니다...")
+    ai_summary = generate_ai_summary(cafe_data, news_data, blog_data)
+    
+    main_text = f"📣 *{today} 미디어 콘텐츠 모니터링 스크랩*\n\n💡 *오늘의 핵심 인사이트 (AI 요약)*\n> {ai_summary.replace(chr(10), chr(10)+'> ')}"
+    
+    log("📤 3. 슬랙 채널에 메인 리포트 전송을 시도합니다...")
+    main_ts = send_slack_message(main_text)
+    
+    if main_ts:
+        log("✅ 메인 리포트 전송 성공! 스레드(댓글) 전송을 시작합니다...")
+        send_slack_message(format_section("☕ 카페", cafe_data), thread_ts=main_ts)
+        send_slack_message(format_section("📰 기사 (뉴스)", news_data), thread_ts=main_ts)
+        send_slack_message(format_section("📝 블로그", blog_data), thread_ts=main_ts)
+        log("🎉 모든 작업이 성공적으로 끝났습니다!")
+    else:
+        log("❌ 슬랙 메인 리포트 전송에 실패하여, 스레드를 달지 못하고 종료합니다.")
+
+if __name__ == "__main__":
+    main()
