@@ -23,8 +23,10 @@ jobs:
       run: |
         pip install requests beautifulsoup4 google-generativeai
 
-    - name: 카페 스크랩 및 AI 요약 프로그램 실행하기
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      run: python main.py
+  - name: 카페 스크랩 및 AI 요약 프로그램 실행하기
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: python main.py
