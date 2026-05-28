@@ -118,7 +118,6 @@ def generate_ai_summary(cafe_data, blog_data, news_data):
 {text_data}
 """
     try:
-        # 🚨 여기서 에러가 났었습니다! 가장 안정적인 gemini-pro 주소로 수정 완료했습니다.
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}]
@@ -167,4 +166,48 @@ def format_section(title, data):
     for keyword in KEYWORDS:
         message += f"==============\n*[ {keyword} ] 검색 결과*\n"
         if not data[keyword]:
-            message += "새로운 글이
+            # 🚨 이전 에러의 원인이었던 바로 그 부분입니다! 확실하게 닫아두었습니다.
+            message += "새로운 글이 없습니다.\n\n"
+        else:
+            for post in data[keyword]:
+                message += f"• <{post['link']}|{post['title']}> ({post['date']})\n  > _{post['snippet'][:100]}..._\n"
+            message += "\n"
+    return message
+
+def main():
+    log("🚀 스크랩 봇 작동을 시작합니다!")
+    
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        log("❌ 네이버 API 키가 없습니다.")
+        return
+
+    kst_now = datetime.utcnow() + timedelta(hours=9)
+    today = kst_now.strftime("%Y년 %m월 %d일")
+    
+    log("🔍 1. 네이버에서 데이터를 수집 중입니다...")
+    cafe_data = {}
+    news_data = {}
+    blog_data = {}
+    
+    for keyword in KEYWORDS:
+        cafe_data[keyword] = search_naver_api(keyword, "cafearticle")
+        news_data[keyword] = search_naver_api(keyword, "news")
+        blog_data[keyword] = search_naver_api(keyword, "blog")
+        
+    log("🧠 2. 데이터 수집 완료! AI 요약을 생성합니다...")
+    ai_summary = generate_ai_summary(cafe_data, blog_data, news_data)
+    
+    main_text = f"📣 *{today} 미디어 콘텐츠 모니터링 스크랩*\n\n💡 *오늘의 핵심 인사이트 (AI 요약)*\n> {ai_summary.replace(chr(10), chr(10)+'> ')}"
+    
+    log("📤 3. 슬랙 채널에 메인 리포트 전송을 시도합니다...")
+    main_ts = send_slack_message(main_text)
+    
+    if main_ts:
+        log("✅ 메인 리포트 전송 성공! 스레드(댓글) 전송을 시작합니다...")
+        send_slack_message(format_section("☕ 카페", cafe_data), thread_ts=main_ts)
+        send_slack_message(format_section("📝 블로그", blog_data), thread_ts=main_ts)
+        send_slack_message(format_section("📰 기사 (뉴스)", news_data), thread_ts=main_ts)
+        log("🎉 모든 작업이 성공적으로 끝났습니다!")
+
+if __name__ == "__main__":
+    main()
