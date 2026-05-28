@@ -2,7 +2,7 @@ import urllib.request
 import json
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 import google.generativeai as genai
 
 # 1. 기본 세팅
@@ -18,16 +18,14 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
-# HTML 태그 제거용 함수 (<b>도도포인트</b> -> 도도포인트)
+# HTML 태그 제거용 함수
 def clean_html(raw_html):
     cleanr = re.compile('<.*?>')
     return re.sub(cleanr, '', raw_html).replace('&quot;', '"').replace('&lt;', '<').replace('&gt;', '>')
 
-def search_naver_api(keyword, search_type="cafearticle"):
-    # search_type: "cafearticle"(카페) 또는 "blog"(블로그)
+def search_naver_api(keyword, search_type):
     encText = urllib.parse.quote(keyword)
-    # sort=date (최신순 정렬), display=10 (10개 가져오기)
-    url = f"https://openapi.naver.com/v1/search/{search_type}.json?query={encText}&display=10&sort=date"
+    url = f"https://openapi.naver.com/v1/search/{search_type}.json?query={encText}&display=5&sort=date"
     
     request = urllib.request.Request(url)
     request.add_header("X-Naver-Client-Id", NAVER_CLIENT_ID)
@@ -41,40 +39,46 @@ def search_naver_api(keyword, search_type="cafearticle"):
             data = json.loads(response_body.decode('utf-8'))
             
             posts = []
-            # 어제 날짜 구하기 (YYYYMMDD 형식 비교용)
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-            
             for item in data['items']:
-                # 블로그 API는 'postdate'(YYYYMMDD), 카페 API는 생성이슈로 날짜가 안 올수 있으므로 최근 5개만 무조건 가져오는 식으로 일단 진행
                 title = clean_html(item['title'])
                 link = item['link']
                 snippet = clean_html(item['description'])
                 posts.append({"title": title, "link": link, "snippet": snippet})
-            
-            return posts[:5] # 최신 5개만 자르기
+            return posts
     except Exception as e:
         print(f"네이버 API 호출 에러 ({keyword}): {e}")
         return []
-    
     return []
 
-def generate_ai_summary(all_posts_data):
+def generate_ai_summary(cafe_data, blog_data):
     if not GEMINI_API_KEY:
         return "⚠️ 제미나이 API 키가 등록되지 않았습니다."
         
     text_data = ""
     post_count = 0
-    for keyword, posts in all_posts_data.items():
+    
+    # 카페 데이터 취합
+    text_data += "--- 카페 데이터 ---\n"
+    for keyword, posts in cafe_data.items():
         if posts:
-            text_data += f"\n[{keyword}]\n"
+            text_data += f"[{keyword}]\n"
+            for p in posts:
+                text_data += f"- 제목: {p['title']}\n- 내용: {p['snippet']}\n"
+                post_count += 1
+                
+    # 블로그 데이터 취합
+    text_data += "\n--- 블로그 데이터 ---\n"
+    for keyword, posts in blog_data.items():
+        if posts:
+            text_data += f"[{keyword}]\n"
             for p in posts:
                 text_data += f"- 제목: {p['title']}\n- 내용: {p['snippet']}\n"
                 post_count += 1
                 
     if post_count == 0:
-        return "어제 하루 동안 새로 올라온 카페 글이 없습니다."
+        return "어제 하루 동안 새로 올라온 카페 및 블로그 글이 없습니다."
         
-    prompt = f"""다음은 어제 하루 동안 네이버 카페에 올라온 우리 회사 서비스(도도포인트, 나우웨이팅, 플레이스앤) 관련 게시글 데이터입니다.
+    prompt = f"""다음은 최근 네이버 카페와 블로그에 올라온 우리 회사 서비스(도도포인트, 나우웨이팅, 플레이스앤) 관련 게시글 데이터입니다.
 이 내용을 바탕으로 점주들이나 고객들의 반응, 불만 사항, 혹은 특이한 시장 동향(인사이트)을 파악해서 딱 2~3줄로 핵심만 요약해주세요.
 말투는 비즈니스 보고서 형식(~음, ~함)으로 해주세요.
 
@@ -100,25 +104,43 @@ def main():
         return
 
     today = datetime.now().strftime("%Y년 %m월 %d일")
-    all_posts_data = {}
+    cafe_data = {}
+    blog_data = {}
     
+    # 카페와 블로그 데이터를 각각 분리해서 수집
     for keyword in KEYWORDS:
-        # 카페 글 검색 API 호출
-        all_posts_data[keyword] = search_naver_api(keyword, "cafearticle")
+        cafe_data[keyword] = search_naver_api(keyword, "cafearticle")
+        blog_data[keyword] = search_naver_api(keyword, "blog")
         
-    ai_summary = generate_ai_summary(all_posts_data)
+    # 수집된 데이터로 AI 요약 생성
+    ai_summary = generate_ai_summary(cafe_data, blog_data)
     
-    message = f"📣 *{today} 네이버 카페 모니터링 리포트*\n\n"
+    # ---------------- 슬랙 메시지 조립 시작 ----------------
+    message = f"📣 *{today} 네이버 모니터링 리포트*\n\n"
     message += f"💡 *오늘의 핵심 인사이트 (AI 요약)*\n> {ai_summary.replace(chr(10), chr(10)+'> ')}\n\n"
     
-    for keyword, posts in all_posts_data.items():
-        message += f"==============\n*[ {keyword} ] 최근 카페 검색 결과*\n"
-        if not posts:
+    # [카페 섹션]
+    message += "*카페*\n"
+    for keyword in KEYWORDS:
+        message += f"==============\n*[ {keyword} ] 최근 1일 검색 결과*\n"
+        if not cafe_data[keyword]:
             message += "새로운 글이 없습니다.\n\n"
         else:
-            for post in posts:
+            for post in cafe_data[keyword]:
                 message += f"• <{post['link']}|{post['title']}>\n"
             message += "\n"
+            
+    # [블로그 섹션]
+    message += "*블로그*\n"
+    for keyword in KEYWORDS:
+        message += f"==============\n*[ {keyword} ] 최근 1일 검색 결과*\n"
+        if not blog_data[keyword]:
+            message += "새로운 글이 없습니다.\n\n"
+        else:
+            for post in blog_data[keyword]:
+                message += f"• <{post['link']}|{post['title']}>\n"
+            message += "\n"
+    # ---------------- 슬랙 메시지 조립 끝 ----------------
             
     send_slack_message(message)
     print("슬랙 메시지 전송 완료!")
