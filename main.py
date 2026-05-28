@@ -47,7 +47,6 @@ def search_naver_api(keyword, search_type):
             for item in data['items']:
                 post_date_formatted = ""
                 
-                # 날짜 필터링 및 발행일 포맷팅
                 if search_type == "blog":
                     raw_date = item.get("postdate", "")
                     if raw_date != yesterday_str:
@@ -86,7 +85,6 @@ def search_naver_api(keyword, search_type):
         return []
     return []
 
-# 🚨 구글 파이썬 도구(SDK)를 버리고, 가장 확실한 다이렉트 API 통신으로 변경!
 def generate_ai_summary(cafe_data, blog_data, news_data):
     if not GEMINI_API_KEY:
         return "⚠️ 제미나이 API 키가 설정되지 않았습니다."
@@ -94,7 +92,6 @@ def generate_ai_summary(cafe_data, blog_data, news_data):
     text_data = ""
     post_count = 0
     
-    # 순서 변경: 카페 -> 블로그 -> 기사
     for category, data in [("카페", cafe_data), ("블로그", blog_data), ("기사", news_data)]:
         text_data += f"\n--- {category} 데이터 ---\n"
         for keyword, posts in data.items():
@@ -107,7 +104,6 @@ def generate_ai_summary(cafe_data, blog_data, news_data):
     if post_count == 0:
         return "어제 하루 동안 새로 올라온 관련 콘텐츠가 없습니다."
         
-    # 담당자들을 위한 비즈니스 인사이트 특화 프롬프트
     prompt = f"""다음은 어제 하루 동안 네이버 카페, 블로그, 뉴스에 올라온 우리 회사 서비스(도도포인트, 나우웨이팅) 관련 모니터링 데이터입니다.
 이 데이터를 바탕으로 실무 담당자들이 즉시 활용할 수 있는 비즈니스 아이디어와 인사이트를 도출해주세요.
 반드시 아래 두 가지 항목으로 나누어 비즈니스 보고서 형식(~음, ~함)으로 명확하게 요약해주세요.
@@ -122,7 +118,8 @@ def generate_ai_summary(cafe_data, blog_data, news_data):
 {text_data}
 """
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        # 🚨 여기서 에러가 났었습니다! 가장 안정적인 gemini-pro 주소로 수정 완료했습니다.
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}]
         }
@@ -170,48 +167,4 @@ def format_section(title, data):
     for keyword in KEYWORDS:
         message += f"==============\n*[ {keyword} ] 검색 결과*\n"
         if not data[keyword]:
-            message += "새로운 글이 없습니다.\n\n"
-        else:
-            for post in data[keyword]:
-                message += f"• <{post['link']}|{post['title']}> ({post['date']})\n  > _{post['snippet'][:100]}..._\n"
-            message += "\n"
-    return message
-
-def main():
-    log("🚀 스크랩 봇 작동을 시작합니다!")
-    
-    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
-        log("❌ 네이버 API 키가 없습니다.")
-        return
-
-    kst_now = datetime.utcnow() + timedelta(hours=9)
-    today = kst_now.strftime("%Y년 %m월 %d일")
-    
-    log("🔍 1. 네이버에서 데이터를 수집 중입니다...")
-    cafe_data = {}
-    news_data = {}
-    blog_data = {}
-    
-    for keyword in KEYWORDS:
-        cafe_data[keyword] = search_naver_api(keyword, "cafearticle")
-        news_data[keyword] = search_naver_api(keyword, "news")
-        blog_data[keyword] = search_naver_api(keyword, "blog")
-        
-    log("🧠 2. 데이터 수집 완료! AI 요약을 생성합니다...")
-    ai_summary = generate_ai_summary(cafe_data, blog_data, news_data)
-    
-    main_text = f"📣 *{today} 미디어 콘텐츠 모니터링 스크랩*\n\n💡 *오늘의 핵심 인사이트 (AI 요약)*\n> {ai_summary.replace(chr(10), chr(10)+'> ')}"
-    
-    log("📤 3. 슬랙 채널에 메인 리포트 전송을 시도합니다...")
-    main_ts = send_slack_message(main_text)
-    
-    if main_ts:
-        log("✅ 메인 리포트 전송 성공! 스레드(댓글) 전송을 시작합니다...")
-        # 순서 변경: 카페 -> 블로그 -> 기사
-        send_slack_message(format_section("☕ 카페", cafe_data), thread_ts=main_ts)
-        send_slack_message(format_section("📝 블로그", blog_data), thread_ts=main_ts)
-        send_slack_message(format_section("📰 기사 (뉴스)", news_data), thread_ts=main_ts)
-        log("🎉 모든 작업이 성공적으로 끝났습니다!")
-
-if __name__ == "__main__":
-    main()
+            message += "새로운 글이
