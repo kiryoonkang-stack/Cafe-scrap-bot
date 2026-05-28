@@ -18,9 +18,9 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: 필요한 도구 설치하기
+    - name: 필요한 도구 최신 버전으로 설치하기
       run: |
-        pip install requests beautifulsoup4 google-generativeai
+        pip install -U requests beautifulsoup4 google-generativeai
 
     - name: 스크랩 프로그램 실행하기
       env:
