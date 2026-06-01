@@ -2,8 +2,8 @@ name: Cafe Scrap Bot
 
 on:
   schedule:
-    # 한국 시간(KST) 오전 10시 = UTC 오전 1시 (월~금요일만 실행)
-    - cron: '0 1 * * 1-5'
+    # 한국 시간(KST) 오전 9시 55분 = UTC 오전 0시 55분 (월~금요일만 실행)
+    - cron: '55 0 * * 1-5'
   workflow_dispatch:
 
 jobs:
