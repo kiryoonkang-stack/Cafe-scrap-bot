@@ -2,13 +2,15 @@ name: Cafe Scrap Bot
 
 on:
   schedule:
-    # 깃허브 서버 자극을 위해 55분 -> 56분으로 딱 1분만 변경 (한국 시간 오전 9시 56분)
-    - cron: '56 0 * * 1-5'
+    # 한국 시간(KST) 오전 9시 10분 = UTC 오전 0시 10분 (월~금요일만 실행)
+    - cron: '10 0 * * 1-5'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
     - name: 깃허브 코드 가져오기
